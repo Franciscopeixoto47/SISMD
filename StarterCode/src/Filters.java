@@ -111,10 +111,8 @@ public class Filters {
         return new CumulativeResult(cumulative, cdfMin);
     }
 
-
-
     //Sequential baseline implementation for histogram equalization
-    //Processes the image pixel-by-pixel in a single thread (sequentially)
+    //Processes the image pixel-by-pixel in a (sequentially)
     public void sequentialHistogramFilter(String outputFile, int value) throws IOException {
         HistogramFilter(outputFile, value);
     }
@@ -163,6 +161,109 @@ public class Filters {
                 hist[i] += localHists[t][i];
             }
         }
+        int total_pixels = height * width;
+
+        CumulativeResult cumRes = computeCumulative(hist);
+        int[] cumulative = cumRes.cumulative;
+        int cdfMin = cumRes.cdfMin;
+
+        applyEqualizationAndWrite(tmp, cumulative, cdfMin, total_pixels, outputFile);
+    }
+
+
+    //Multithreaded implementation for histogram equalization using thread pools.
+    public void threadPoolHistogramFilter(String outputFile, int value) throws IOException {
+        int numThreads = value > 0 ? value : 2; // Default to 2 threads if value is invalid
+        Color[][] tmp = Utils.copyImage(image);
+        int height = tmp.length;
+        int width = tmp[0].length;
+        int[][] localHists = new int[numThreads][256];
+        ExecutorService executor = Executors.newFixedThreadPool(numThreads);
+        CountDownLatch latch = new CountDownLatch(numThreads);
+
+        //Each task computes a local histogram for its assigned rows
+        for (int t = 0; t < numThreads; t++) {
+            final int threadId = t;
+            executor.submit(() -> {
+                int startRow = threadId * height / numThreads;
+                int endRow = (threadId + 1) * height / numThreads;
+                for (int i = startRow; i < endRow; i++) {
+                    for (int j = 0; j < width; j++) {
+                        Color pixel = tmp[i][j];
+                        int r = pixel.getRed();
+                        int g = pixel.getGreen();
+                        int b = pixel.getBlue();
+                        int lum = computeLuminosity(r, g, b);
+                        localHists[threadId][lum]++;
+                    }
+                }
+                latch.countDown();
+            });
+        }
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        executor.shutdown();
+        //Merge local histograms into a global histogram
+        int[] hist = new int[256];
+        for (int t = 0; t < numThreads; t++) {
+            for (int i = 0; i < 256; i++) {
+                hist[i] += localHists[t][i];
+            }
+        }
+        int total_pixels = height * width;
+
+        CumulativeResult cumRes = computeCumulative(hist);
+        int[] cumulative = cumRes.cumulative;
+        int cdfMin = cumRes.cdfMin;
+
+        applyEqualizationAndWrite(tmp, cumulative, cdfMin, total_pixels, outputFile);
+    }
+
+    // Splits the image into tasks executed asynchronously and composes results without explicit thread management.
+    public void completableFutureHistogramFilter(String outputFile, int value) throws IOException {
+        int numTasks = value > 0 ? value : Runtime.getRuntime().availableProcessors();
+        Color[][] tmp = Utils.copyImage(image);
+        int height = tmp.length;
+        int width = tmp[0].length;
+
+        @SuppressWarnings("unchecked")
+        CompletableFuture<int[]>[] futures = new CompletableFuture[numTasks];
+
+        for (int t = 0; t < numTasks; t++) {
+            final int startRow = t * height / numTasks;
+            final int endRow = (t + 1) * height / numTasks;
+            futures[t] = CompletableFuture.supplyAsync(() -> {
+                int[] hist = new int[256];
+                for (int i = startRow; i < endRow; i++) {
+                    for (int j = 0; j < width; j++) {
+                        Color pixel = tmp[i][j];
+                        int r = pixel.getRed();
+                        int g = pixel.getGreen();
+                        int b = pixel.getBlue();
+                        int lum = computeLuminosity(r, g, b);
+                        hist[lum]++;
+                    }
+                }
+                return hist;
+            });
+        }
+
+        // Wait for all tasks to complete
+        CompletableFuture<Void> all = CompletableFuture.allOf(futures);
+        all.join();
+
+        // Merge local histograms into a global histogram
+        int[] hist = new int[256];
+        for (int t = 0; t < numTasks; t++) {
+            int[] local = futures[t].join();
+            for (int i = 0; i < 256; i++) {
+                hist[i] += local[i];
+            }
+        }
+
         int total_pixels = height * width;
 
         CumulativeResult cumRes = computeCumulative(hist);
