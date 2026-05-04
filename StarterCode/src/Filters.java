@@ -17,7 +17,7 @@ public class Filters {
         image = Utils.loadImage(filename);
     }
     
-    public void HistogramFilter(String outputFile, int value) throws IOException {
+    public void HistogramFilter(String outputFile) {
         Color[][] tmp = Utils.copyImage(image);
         int[] hist = new int[256];
         int total_pixels = tmp.length*tmp[0].length;
@@ -39,26 +39,6 @@ public class Filters {
         int[] cumulative = cumRes.cumulative;
         int cdfMin = cumRes.cdfMin;
 
-        //Change each pixel of the output image
-        for (int i = 0; i < tmp.length; i++) {
-            for (int j = 0; j < tmp[i].length; j++) {
-
-            Color pixel = tmp[i][j];
-            int r = pixel.getRed();
-            int g = pixel.getGreen();
-            int b = pixel.getBlue();
-            int lum = computeLuminosity(r, g, b);
-            //int newLum = 255*(cumulative[lum]/total_pixels);
-
-            double cdf = (double) cumulative[lum] / (double) (total_pixels - cdfMin);
-            int newLum = (int) Math.round(255.0 * cdf);
-
-            //if (newLum < 0) newLum = 0;
-            //if (newLum > 255) newLum = 255;
-            tmp[i][j] = new Color(newLum, newLum, newLum);
-            }
-        }
-        //Utils.writeImage(tmp, outputFile);
         applyEqualizationAndWrite(tmp, cumulative, cdfMin, total_pixels, outputFile);
     }
 
@@ -83,7 +63,7 @@ public class Filters {
         for (int i = 0; i < height; i++) {
             for (int j = 0; j < width; j++) {
                 Color pixel = tmp[i][j];
-                int r = pixel.getRed();
+                 int r = pixel.getRed();
                 int g = pixel.getGreen();
                 int b = pixel.getBlue();
                 int lum = computeLuminosity(r, g, b);
@@ -111,14 +91,12 @@ public class Filters {
         return new CumulativeResult(cumulative, cdfMin);
     }
 
-    //Sequential baseline implementation for histogram equalization
-    //Processes the image pixel-by-pixel in a (sequentially)
-    public void sequentialHistogramFilter(String outputFile, int value) throws IOException {
-        HistogramFilter(outputFile, value);
+    //1. Sequential implementation
+    public void sequentialHistogramFilter(String outputFile) {
+        HistogramFilter(outputFile);
     }
 
-    //Multithreaded implementation for histogram equalization (manual thread management, no thread pools).
-    //Distributes work among threads and synchronizes histogram merging.
+    //2. Multithreaded implementation - without thread pools
     public void multithreadedHistogramFilter(String outputFile, int value) throws IOException {
         int numThreads = value > 0 ? value : 2; // Default to 2 threads if value is invalid
         Color[][] tmp = Utils.copyImage(image);
@@ -162,7 +140,6 @@ public class Filters {
             }
         }
         int total_pixels = height * width;
-
         CumulativeResult cumRes = computeCumulative(hist);
         int[] cumulative = cumRes.cumulative;
         int cdfMin = cumRes.cdfMin;
@@ -171,7 +148,7 @@ public class Filters {
     }
 
 
-    //Multithreaded implementation for histogram equalization using thread pools.
+    //3. Multithreaded implementation - with thread pools
     public void threadPoolHistogramFilter(String outputFile, int value) throws IOException {
         int numThreads = value > 0 ? value : 2; // Default to 2 threads if value is invalid
         Color[][] tmp = Utils.copyImage(image);
@@ -222,14 +199,36 @@ public class Filters {
         applyEqualizationAndWrite(tmp, cumulative, cdfMin, total_pixels, outputFile);
     }
 
-    // Splits the image into tasks executed asynchronously and composes results without explicit thread management.
+    //4. Fork/Join framework implementation
+    public void forkJoinHistogramFilter(String outputFile, int value) throws IOException {
+        int parallelism = value > 0 ? value : Runtime.getRuntime().availableProcessors();
+        Color[][] tmp = Utils.copyImage(image);
+        int height = tmp.length;
+        int width = tmp[0].length;
+
+        ForkJoinPool pool = new ForkJoinPool(parallelism);
+        try {
+            HistogramTask root = new HistogramTask(this, tmp, 0, height, width);
+            int[] hist = pool.invoke(root);
+
+            int total_pixels = height * width;
+            CumulativeResult cumRes = computeCumulative(hist);
+            int[] cumulative = cumRes.cumulative;
+            int cdfMin = cumRes.cdfMin;
+
+            applyEqualizationAndWrite(tmp, cumulative, cdfMin, total_pixels, outputFile);
+        } finally {
+            pool.shutdown();
+        }
+    }
+
+    //5. Splits the image into tasks executed asynchronously and composes results without explicit thread management.
     public void completableFutureHistogramFilter(String outputFile, int value) throws IOException {
         int numTasks = value > 0 ? value : Runtime.getRuntime().availableProcessors();
         Color[][] tmp = Utils.copyImage(image);
         int height = tmp.length;
         int width = tmp[0].length;
 
-        @SuppressWarnings("unchecked")
         CompletableFuture<int[]>[] futures = new CompletableFuture[numTasks];
 
         for (int t = 0; t < numTasks; t++) {
@@ -250,7 +249,6 @@ public class Filters {
                 return hist;
             });
         }
-
         // Wait for all tasks to complete
         CompletableFuture<Void> all = CompletableFuture.allOf(futures);
         all.join();
@@ -263,9 +261,7 @@ public class Filters {
                 hist[i] += local[i];
             }
         }
-
         int total_pixels = height * width;
-
         CumulativeResult cumRes = computeCumulative(hist);
         int[] cumulative = cumRes.cumulative;
         int cdfMin = cumRes.cdfMin;

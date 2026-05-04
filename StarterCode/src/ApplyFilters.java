@@ -11,24 +11,32 @@ public class ApplyFilters {
         System.out.println("1 - Sequential");
         System.out.println("2 - Multithreaded (manual threads)");
         System.out.println("3 - Multithreaded (thread pools)");
+        System.out.println("4 - Fork/Join framework");
+        System.out.println("5 - CompletableFuture-based");
 
         int choice = scanner.nextInt();
         int threads = 1;
-        if (choice > 1 && choice <= 3) {
-            System.out.print("Enter number of threads/parallelism: ");
+        if (choice > 1 && choice <= 5) {
+            System.out.print("Enter number of threads: ");
             threads = scanner.nextInt();
         }
         long startTime = System.nanoTime();
         boolean validChoice = true;
         switch (choice) {
             case 1:
-                filters.sequentialHistogramFilter("output.jpg", 128);
+                filters.sequentialHistogramFilter("output1.jpg");
                 break;
             case 2:
-                filters.multithreadedHistogramFilter("output.jpg", threads);
+                filters.multithreadedHistogramFilter("output2.jpg", threads);
                 break;
             case 3:
-                filters.threadPoolHistogramFilter("output.jpg", threads);
+                filters.threadPoolHistogramFilter("output3.jpg", threads);
+                break;
+            case 4:
+                filters.forkJoinHistogramFilter("output4.jpg", threads);
+                break;
+            case 5:
+                filters.completableFutureHistogramFilter("output5.jpg", threads);
                 break;
             default:
                 validChoice = false;
