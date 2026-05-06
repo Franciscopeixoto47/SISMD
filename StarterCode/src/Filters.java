@@ -21,6 +21,7 @@ public class Filters {
         Color[][] tmp = Utils.copyImage(image);
         int[] hist = new int[256];
         int total_pixels = tmp.length*tmp[0].length;
+        System.out.println();
         System.out.println("Total pixels: "+total_pixels);
         // Runs through entire matrix and computes luminosity
         for (int i = 0; i < tmp.length; i++) {
@@ -60,15 +61,26 @@ public class Filters {
     private void applyEqualizationAndWrite(Color[][] tmp, int[] cumulative, int cdfMin, int total_pixels, String outputFile) {
         int height = tmp.length;
         int width = tmp[0].length;
+        int denom = total_pixels - cdfMin;
         for (int i = 0; i < height; i++) {
             for (int j = 0; j < width; j++) {
                 Color pixel = tmp[i][j];
-                 int r = pixel.getRed();
+                int r = pixel.getRed();
                 int g = pixel.getGreen();
                 int b = pixel.getBlue();
                 int lum = computeLuminosity(r, g, b);
-                double cdf = (double) cumulative[lum] / (double) (total_pixels - cdfMin);
-                int newLum = (int) Math.round(255.0 * cdf);
+                int newLum;
+                if (denom <= 0) {
+                    newLum = lum; // Flat image; keep original luminance
+                } else {
+                    double cdf = (double) (cumulative[lum] - cdfMin) / (double) denom;
+                    newLum = (int) Math.round(255.0 * cdf);
+                }
+                if (newLum < 0) {
+                    newLum = 0;
+                } else if (newLum > 255) {
+                    newLum = 255;
+                }
                 tmp[i][j] = new Color(newLum, newLum, newLum);
             }
         }
