@@ -1,7 +1,6 @@
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -57,12 +56,14 @@ public class ApplyFilters {
             running.set(true);
             samplerThread = new Thread(() -> {
                 while (running.get()) {
-                    long used = memoryBean.getHeapMemoryUsage().getUsed();
-                    peakHeapBytes.updateAndGet(prev -> Math.max(prev, used));
                     try {
+                        long used = memoryBean.getHeapMemoryUsage().getUsed();
+                        peakHeapBytes.updateAndGet(prev -> Math.max(prev, used));
                         Thread.sleep(SAMPLE_INTERVAL_MS);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
+                        break;
+                    } catch (OutOfMemoryError e) {
                         break;
                     }
                 }
