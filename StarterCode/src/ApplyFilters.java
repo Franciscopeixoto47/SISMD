@@ -1,20 +1,16 @@
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
-import java.lang.management.MemoryMXBean;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.Scanner;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
 import com.sun.management.OperatingSystemMXBean;
 
 public class ApplyFilters {
 
     private static final String METRICS_CSV = "metrics.csv";
-    private static final long SAMPLE_INTERVAL_MS = 100;
 
     @FunctionalInterface
     private interface FilterAction {
@@ -25,62 +21,29 @@ public class ApplyFilters {
         private final double wallMs;
         private final double cpuMs;
         private final double cpuPercent;
-        private final double peakHeapMb;
 
-        private MetricsResult(double wallMs, double cpuMs, double cpuPercent, double peakHeapMb) {
+        private MetricsResult(double wallMs, double cpuMs, double cpuPercent) {
             this.wallMs = wallMs;
             this.cpuMs = cpuMs;
             this.cpuPercent = cpuPercent;
-            this.peakHeapMb = peakHeapMb;
         }
     }
 
     private static class MetricsCollector {
         private final OperatingSystemMXBean osBean;
-        private final MemoryMXBean memoryBean;
-        private final AtomicBoolean running = new AtomicBoolean(false);
-        private final AtomicLong peakHeapBytes = new AtomicLong(0L);
-        private Thread samplerThread;
         private long startWallNanos;
         private long startCpuNanos;
 
         private MetricsCollector() {
             this.osBean = (OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
-            this.memoryBean = ManagementFactory.getMemoryMXBean();
         }
 
         private void start() {
             startWallNanos = System.nanoTime();
             startCpuNanos = osBean.getProcessCpuTime();
-            peakHeapBytes.set(memoryBean.getHeapMemoryUsage().getUsed());
-            running.set(true);
-            samplerThread = new Thread(() -> {
-                while (running.get()) {
-                    try {
-                        long used = memoryBean.getHeapMemoryUsage().getUsed();
-                        peakHeapBytes.updateAndGet(prev -> Math.max(prev, used));
-                        Thread.sleep(SAMPLE_INTERVAL_MS);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    } catch (OutOfMemoryError e) {
-                        break;
-                    }
-                }
-            }, "metrics-sampler");
-            samplerThread.setDaemon(true);
-            samplerThread.start();
         }
 
         private MetricsResult stop() {
-            running.set(false);
-            if (samplerThread != null) {
-                try {
-                    samplerThread.join();
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            }
             long endWallNanos = System.nanoTime();
             long endCpuNanos = osBean.getProcessCpuTime();
             long wallNanos = endWallNanos - startWallNanos;
@@ -91,8 +54,7 @@ public class ApplyFilters {
             double cpuPercent = wallNanos > 0
                     ? (cpuNanos / (double) wallNanos) * (100.0 / processors)
                     : 0.0;
-            double peakHeapMb = peakHeapBytes.get() / (1024.0 * 1024.0);
-            return new MetricsResult(wallMs, cpuMs, cpuPercent, peakHeapMb);
+            return new MetricsResult(wallMs, cpuMs, cpuPercent);
         }
     }
 
@@ -164,7 +126,6 @@ public class ApplyFilters {
             System.out.println();
             System.out.printf("Execution time: %.3f ms.%n", result.wallMs);
             System.out.printf("CPU time: %.3f ms (avg %.2f%%).%n", result.cpuMs, result.cpuPercent);
-            System.out.printf("Peak heap usage: %.2f MB.%n", result.peakHeapMb);
             String imageFileName = java.nio.file.Paths.get(filePath).getFileName().toString();
             appendMetricsCsv(result, choice, threads, imageFileName);
             System.out.printf("Metrics appended to %s.%n", METRICS_CSV);
